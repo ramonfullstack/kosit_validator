@@ -1,0 +1,93 @@
+:root {
+  --bg: #f7f8f5;
+  --surface: #ffffff;
+  --text: #18181b;
+  --muted: #5a6472;
+  --primary: #14532d;
+  --primary-soft: #dcfce7;
+  --border: #dce1e8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
+  background: radial-gradient(circle at 10% 20%, #fefce8 0%, var(--bg) 50%);
+  color: var(--text);
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2.25rem 1rem 4rem;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.input,
+.button {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+  padding: 0.75rem;
+}
+
+.button {
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  background: var(--primary);
+  color: white;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button.secondary {
+  background: var(--primary-soft);
+  color: #14532d;
+}
+
+.label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.result-box {
+  white-space: pre-wrap;
+  min-height: 96px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 0.75rem;
+}
