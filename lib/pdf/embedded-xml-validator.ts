@@ -1,10 +1,8 @@
-import { inflateRawSync, inflateSync } from "node:zlib";
-
 type PdfObject = {
   id: string;
   body: string;
   dictionary: string;
-  stream: Buffer | null;
+  stream: Uint8Array | null;
 };
 
 type XmlFileResult = {
@@ -26,6 +24,49 @@ export type PdfXmlValidationResult = {
   warnings: string[];
   debug: string[];
 };
+
+/* ────────────────── Byte / string helpers ────────────────── */
+
+function uint8ToLatin1(data: Uint8Array): string {
+  let result = "";
+  for (let i = 0; i < data.length; i++) {
+    result += String.fromCharCode(data[i]);
+  }
+  return result;
+}
+
+function latin1ToUint8(str: string): Uint8Array {
+  const result = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    result[i] = str.charCodeAt(i) & 0xff;
+  }
+  return result;
+}
+
+/* ────────────────── Inflate (browser DecompressionStream) ────────────────── */
+
+async function inflate(data: Uint8Array, format: CompressionFormat): Promise<Uint8Array> {
+  const ds = new DecompressionStream(format);
+  const writer = ds.writable.getWriter();
+  const reader = ds.readable.getReader();
+  // new Uint8Array(data) copies into a plain ArrayBuffer, required by WritableStreamDefaultWriter
+  writer.write(new Uint8Array(data));
+  writer.close();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
 
 /* ────────────────── PDF name decoding ────────────────── */
 
@@ -51,7 +92,7 @@ function decodeHexString(hex: string): string {
     }
     return result;
   }
-  return Buffer.from(bytes).toString("latin1");
+  return uint8ToLatin1(new Uint8Array(bytes));
 }
 
 /* ────────────────── Stream filters ────────────────── */
@@ -75,17 +116,17 @@ function parseFilters(dictionary: string) {
   return filters;
 }
 
-function decodeStream(stream: Buffer, filters: string[]) {
+async function decodeStream(stream: Uint8Array, filters: string[]) {
   if (!filters.length) {
     return { data: stream, compressed: false, warning: null as string | null };
   }
 
   if (filters.length === 1 && (filters[0] === "flatedecode" || filters[0] === "fl")) {
     try {
-      return { data: inflateSync(stream), compressed: true, warning: null as string | null };
+      return { data: await inflate(stream, "deflate"), compressed: true, warning: null as string | null };
     } catch {
       try {
-        return { data: inflateRawSync(stream), compressed: true, warning: null as string | null };
+        return { data: await inflate(stream, "deflate-raw"), compressed: true, warning: null as string | null };
       } catch {
         return {
           data: stream,
@@ -105,14 +146,27 @@ function decodeStream(stream: Buffer, filters: string[]) {
 
 /* ────────────────── XML detection ────────────────── */
 
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
 function looksLikeXml(text: string) {
   const trimmed = text.replace(/^\uFEFF/, "").trimStart();
   return trimmed.startsWith("<?xml") || /^<([A-Za-z_][\w:.-]*)(\s|>|\/)/.test(trimmed);
 }
 
-function tryExtractXml(data: Buffer): string | null {
-  for (const encoding of ["utf8", "latin1"] as const) {
-    const candidate = data.toString(encoding);
+function tryExtractXml(data: Uint8Array): string | null {
+  const encodings: Array<(d: Uint8Array) => string> = [
+    (d) => {
+      try {
+        return utf8Decoder.decode(d);
+      } catch {
+        return "";
+      }
+    },
+    uint8ToLatin1,
+  ];
+  for (const decode of encodings) {
+    const candidate = decode(data);
+    if (!candidate) continue;
     if (looksLikeXml(candidate)) return candidate;
     const xmlStart = candidate.indexOf("<?xml");
     if (xmlStart >= 0) return candidate.slice(xmlStart);
@@ -213,8 +267,8 @@ function validateXmlWellFormed(xml: string) {
 
 /* ────────────────── PDF object parsing ────────────────── */
 
-function parsePdfObjects(buffer: Buffer) {
-  const source = buffer.toString("latin1");
+function parsePdfObjects(pdfData: Uint8Array) {
+  const source = uint8ToLatin1(pdfData);
   const objects: PdfObject[] = [];
   const objectPattern = /(\d+)\s+(\d+)\s+obj([\s\S]*?)endobj/g;
 
@@ -225,7 +279,7 @@ function parsePdfObjects(buffer: Buffer) {
     const streamStart = body.indexOf("stream");
     const streamEnd = body.lastIndexOf("endstream");
 
-    let stream: Buffer | null = null;
+    let stream: Uint8Array | null = null;
     let dictionary = body;
 
     if (streamStart >= 0 && streamEnd > streamStart) {
@@ -244,7 +298,7 @@ function parsePdfObjects(buffer: Buffer) {
           : body[streamEnd - 1] === "\n"
           ? streamEnd - 1
           : streamEnd;
-      stream = Buffer.from(body.slice(dataStart, dataEnd), "latin1");
+      stream = latin1ToUint8(body.slice(dataStart, dataEnd));
     }
 
     objects.push({ id: objectId, body, dictionary, stream });
@@ -338,10 +392,10 @@ function findXmlReferences(objects: PdfObject[]) {
 
 /* ────────────────── Main validation function ────────────────── */
 
-export function validatePdfEmbeddedXml(input: Buffer): PdfXmlValidationResult {
+export async function validatePdfEmbeddedXml(input: Uint8Array): Promise<PdfXmlValidationResult> {
   const warnings: string[] = [];
   const debug: string[] = [];
-  const isPdf = input.toString("latin1", 0, 8).includes("%PDF-");
+  const isPdf = uint8ToLatin1(input.slice(0, 8)).includes("%PDF-");
   if (!isPdf) {
     return {
       isPdf: false,
@@ -370,7 +424,7 @@ export function validatePdfEmbeddedXml(input: Buffer): PdfXmlValidationResult {
     if (!obj.stream) continue;
 
     const filterNames = parseFilters(obj.dictionary);
-    const decoded = decodeStream(obj.stream, filterNames);
+    const decoded = await decodeStream(obj.stream, filterNames);
     if (decoded.warning) warnings.push(`${obj.id}: ${decoded.warning}`);
 
     const fileRef = xmlRefsByObject.get(obj.id) ?? null;
@@ -419,7 +473,7 @@ export function validatePdfEmbeddedXml(input: Buffer): PdfXmlValidationResult {
     if (!obj.stream || foundObjectIds.has(obj.id)) continue;
 
     const filterNames = parseFilters(obj.dictionary);
-    const decoded = decodeStream(obj.stream, filterNames);
+    const decoded = await decodeStream(obj.stream, filterNames);
 
     // Skip tiny streams (likely not XML documents) and page content streams
     if (decoded.data.length < 50) continue;
