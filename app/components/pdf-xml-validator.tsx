@@ -1,45 +1,8 @@
 "use client";
 
 import { useState } from "react";
-
-/* ── Validation types ── */
-
-type XmlFileResult = {
-  objectId: string;
-  filename: string | null;
-  size: number;
-  compressed: boolean;
-  wellFormed: boolean | null;
-  parseError: string | null;
-  matchReason: string;
-};
-
-type ValidationResponse = {
-  isPdf: boolean;
-  hasEmbeddedFiles: boolean;
-  hasEmbeddedXml: boolean;
-  isValid: boolean;
-  files: XmlFileResult[];
-  warnings: string[];
-  debug: string[];
-};
-
-/* ── Extraction types ── */
-
-type ExtractedXml = {
-  objectId: string;
-  filename: string | null;
-  size: number;
-  content: string;
-  matchReason: string;
-};
-
-type ExtractionResponse = {
-  isPdf: boolean;
-  files: ExtractedXml[];
-  error: string | null;
-  debug: string[];
-};
+import { validatePdfEmbeddedXml, type PdfXmlValidationResult } from "@/lib/pdf/embedded-xml-validator";
+import { extractXmlFromPdf, type PdfXmlExtractionResult } from "@/lib/pdf/extract-xml";
 
 type ValidatorState = "idle" | "processing" | "done" | "error";
 type ActiveTab = "validate" | "extract";
@@ -63,16 +26,13 @@ export function PdfXmlValidator() {
   /* Validation state */
   const [valState, setValState] = useState<ValidatorState>("idle");
   const [valError, setValError] = useState("");
-  const [valResult, setValResult] = useState<ValidationResponse | null>(null);
+  const [valResult, setValResult] = useState<PdfXmlValidationResult | null>(null);
 
   /* Extraction state */
   const [extState, setExtState] = useState<ValidatorState>("idle");
   const [extError, setExtError] = useState("");
-  const [extResult, setExtResult] = useState<ExtractionResponse | null>(null);
+  const [extResult, setExtResult] = useState<PdfXmlExtractionResult | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-
-  /* Debug toggle */
-  const [showDebug, setShowDebug] = useState(false);
 
   /* ── Validate ── */
 
@@ -83,19 +43,9 @@ export function PdfXmlValidator() {
     setValResult(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/validate-pdf-xml", {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Falha na validacao do PDF.");
-      }
-
-      setValResult(payload as ValidationResponse);
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await validatePdfEmbeddedXml(new Uint8Array(arrayBuffer));
+      setValResult(result);
       setValState("done");
     } catch (cause) {
       setValState("error");
@@ -115,19 +65,11 @@ export function PdfXmlValidator() {
     setPreviewIndex(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/extract-pdf-xml", {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Falha ao extrair XML do PDF.");
+      const arrayBuffer = await file.arrayBuffer();
+      const data = await extractXmlFromPdf(new Uint8Array(arrayBuffer));
+      if (!data.isPdf) {
+        throw new Error(data.error ?? "Falha ao extrair XML do PDF.");
       }
-
-      const data = payload as ExtractionResponse;
       setExtResult(data);
       setExtState("done");
       if (data.files.length > 0) setPreviewIndex(0);

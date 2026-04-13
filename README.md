@@ -2,6 +2,8 @@
 
 Validador e extrator de XML embutido em PDFs (ZUGFeRD / Factur-X / XRechnung).
 
+Funciona inteiramente no navegador — sem servidor, sem dependências externas.
+
 ## Funcionalidades
 
 - **Validar** — verifica se o PDF contém XML embutido e valida a estrutura (well-formedness)
@@ -9,36 +11,35 @@ Validador e extrator de XML embutido em PDFs (ZUGFeRD / Factur-X / XRechnung).
 
 ## Stack
 
-- Next.js 15 (App Router)
-- Node.js `zlib` para descompressão de streams PDF
+- Next.js 15 (App Router, static export)
+- Browser `DecompressionStream` API para descompressão de streams PDF
 - Zero dependências externas além do React/Next
 
-## Setup local
+## Rodar localmente
 
 ```bash
 npm install
 npm run dev
 ```
 
-Acesse `http://localhost:3000`.
+Acesse `http://localhost:3000/kosit_validator`.
 
-## Como funciona
+## Build estático
 
-1. O PDF é enviado via `FormData` para a API route
-2. O parser lê todos os objetos do PDF em busca de streams com XML
-3. Estratégias de detecção:
-   - `/Type /Filespec` + `/EF` references
-   - `/Type /EmbeddedFile` + `/Subtype` XML
-   - `/AFRelationship` (ZUGFeRD/Factur-X/PDF/A-3)
-   - Brute-force scan de todos os streams
-4. Streams comprimidos com FlateDecode são descompactados automaticamente
+```bash
+npm run build
+```
 
-## API
+Gera o site estático na pasta `out/`.
 
-### `POST /api/validate-pdf-xml`
+## Deploy no GitHub Pages
 
-Valida XML embutido. Envie o PDF como `file` em `multipart/form-data`.
+O deploy é feito automaticamente via GitHub Actions ao fazer push na branch `main`.
 
-### `POST /api/extract-pdf-xml`
+O workflow `.github/workflows/deploy.yml`:
+1. Executa `npm run build` (gera a pasta `out/`)
+2. Publica o conteúdo de `out/` no GitHub Pages
 
-Extrai o conteúdo XML. Mesmo formato de envio.
+O site fica disponível em `https://<usuario>.github.io/kosit_validator/`.
+
+> **Ativar GitHub Pages**: no repositório, acesse *Settings → Pages → Source* e selecione **GitHub Actions**.
